@@ -52,7 +52,7 @@ def timestamp2string(timestamps, T=48):
                         int(1+ts.to_datetime().hour*num_per_T+ts.to_datetime().minute/(60 // num_per_T))) for ts in timestamps]
     # int(1+ts.to_datetime().hour*2+ts.to_datetime().minute/30)) for ts in timestamps]
 
-def create_dict(data, timestamps):
+def   create_dict(data, timestamps):
 
     # Function that creates a dictionary with inflow (_End) or outflow (_Start) matrix for each timestamp.
 

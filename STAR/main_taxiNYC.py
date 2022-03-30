@@ -45,11 +45,11 @@ path_cache = os.path.join(DATAPATH, 'CACHE', 'STAR')  # cache path
 path_result = 'RET'
 path_model = 'MODEL'
 if os.path.isdir(path_result) is False:
-    os.mkdir(path_result)
+    os.makedirs(path_result)
 if os.path.isdir(path_model) is False:
-    os.mkdir(path_model)
+    os.makedirs(path_model)
 if CACHEDATA and os.path.isdir(path_cache) is False:
-    os.mkdir(path_cache)
+    os.makedirs(path_cache)
 
 def build_model(len_c, len_p, len_t, nb_flow, map_height, map_width,
                 external_dim, nb_residual_unit, bn, bn2=False, save_model_pic=False, lr=0.00015):
@@ -219,7 +219,7 @@ def cache(fname, X_train_all, Y_train_all, X_train, Y_train, X_val, Y_val, X_tes
 #         csv_name = os.path.join('results','star_bikeNYC_results.csv')
 #         if not os.path.isfile(csv_name):
 #             if os.path.isdir('results') is False:
-#                 os.mkdir('results')
+#                 os.makedirs('results')
 #             with open(csv_name, 'a', encoding = "utf-8") as file:
 #                 file.write(
 #                   'len_closeness,len_period,len_trend,'
@@ -338,7 +338,7 @@ def train_model(lr, batch_size, residual_units, save_results=False, i=''):
         csv_name = os.path.join('results', 'star_taxiNYC_results.csv')
         if not os.path.isfile(csv_name):
             if os.path.isdir('results') is False:
-                os.mkdir('results')
+                os.makedirs('results')
             with open(csv_name, 'a', encoding="utf-8") as file:
                 file.write('iteration,'
                            'rsme_in,rsme_out,rsme_tot,'
@@ -373,7 +373,7 @@ optimizer.maximize(init_points=2, n_iter=10)
 
 # training-test-evaluation iterations with best params
 if os.path.isdir('results') is False:
-    os.mkdir('results')
+    os.makedirs('results')
 targets = [e['target'] for e in optimizer.res]
 bs_fname = 'bs_taxiNYC.json'
 with open(os.path.join('results', bs_fname), 'w') as f:

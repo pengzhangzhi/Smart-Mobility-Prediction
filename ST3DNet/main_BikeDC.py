@@ -1,107 +1,94 @@
-from __future__ import print_function
-import os
-import _pickle as pickle
-import numpy as np
-import math
-import h5py
-import time
-import json
-from bayes_opt import BayesianOptimization
+from einops import rearrange
+from ST3DNet import *
+import pickle
 
+from utils import *
+import os
+import json
+import time
+from bayes_opt import BayesianOptimization
+import math
+import numpy as np
+import sys
+from os.path import abspath, join, dirname
+sys.path.insert(0, join(abspath(dirname(__file__)), '../'))
+from data.prepareDataBike import load_data_Bike
 import tensorflow as tf
 from keras import backend as K
+from keras.utils.vis_utils import plot_model
 from keras.optimizers import Adam
+from tensorflow.compat.v1 import ConfigProto
+from tensorflow.compat.v1 import InteractiveSession
 from keras.callbacks import EarlyStopping, ModelCheckpoint
+from sklearn.model_selection import ParameterGrid
 
-from src.model import build_model
-import src.metrics as metrics
-from src.datasets import TaxiNYC
-from src.evaluation import evaluate
-from cache_utils import cache, read_cache
+from evaluation import evaluate
 
+config = ConfigProto()
+config.gpu_options.allow_growth = True
+session = InteractiveSession(config=config)
 
-# tf.config.experimental.set_virtual_device_configuration(gpus[0], [tf.config.experimental.VirtualDeviceConfiguration(memory_limit=6144)])
-gpus = tf.config.experimental.list_physical_devices('GPU')
-if gpus:
-    try:
-        for gpu in gpus:  # Currently, memory growth needs to be the same across GPUs
-            tf.config.experimental.set_memory_growth(gpu, True)
-    except RuntimeError as e:
-        print(e)  # Memory growth must be set before GPUs have been initialized
-
-# parameters
-DATAPATH = '../data' 
 nb_epoch = 100  # number of epoch at training stage
-# nb_epoch_cont = 150  # number of epoch at training (cont) stage
-T = 24  # number of time intervals in one day
-CACHEDATA = True  # cache data or NOT
-
-len_closeness = len_c = 2  # length of closeness dependent sequence
+# batch_size = [16,32,64]  # batch size
+T = 48  # number of time intervals in one day
+# lr = [0.00015, 0.00035]  # learning rate
+# lr = 0.00002  # learning rate
+len_closeness = len_c =  6  # length of closeness dependent sequence
 len_period = len_p = 0  # length of peroid dependent sequence
-len_trend = len_t = 1  # length of trend dependent sequence
-# len_cpt = [[2,0,1]]
-# batch_size = [16, 64]  # batch size
-# lr = [0.0015, 0.00015]  # learning rate
-# lstm = [350, 500]
-# lstm_number = [2, 3]
-
+len_trend = len_t = 4  # length of trend dependent sequence
+# nb_residual_unit = [4,5,6]   # number of residual units
 nb_flow = 2  # there are two types of flows: new-flow and end-flow
-# divide data into two subsets: Train & Test, 
-days_test = 7*4
-len_test = T*days_test
-len_val = 2*len_test
+days_test = 7*4  
+len_test = T * days_test
+map_height, map_width = 32, 16  # grid size
 
-map_height, map_width = 16, 8  # grid size
-
-path_cache = os.path.join(DATAPATH, 'CACHE', '3D-CLoST')  # cache path
 path_result = 'RET'
 path_model = 'MODEL'
 if os.path.isdir(path_result) is False:
     os.makedirs(path_result)
 if os.path.isdir(path_model) is False:
     os.makedirs(path_model)
-if CACHEDATA and os.path.isdir(path_cache) is False:
-    os.makedirs(path_cache)
+
+filename = os.path.join("../data", 'CACHE', 'ST3DNet', 'BikeDC_c%d_p%d_t%d_noext'%(len_closeness, len_period, len_trend))
+
+X_train, Y_train, X_test, Y_test, mmn, external_dim, timestamp_train, timestamp_test = load_data_Bike(T=T, nb_flow=nb_flow,dataset="BIKEDC201901-202201",
+                      len_closeness=len_closeness, len_period=len_period, len_trend=len_trend,
+                      len_test=len_test, meta_data=True, holiday_data=True, meteorol_data=True,prediction_offset=0)
+for i in range(len(X_train)):
+        if len(X_train[i].shape) == 4:
+            X_train[i] = rearrange(X_train[i],"n (c1 c) h w -> n c1 c h w",c1=2)
+for i in range(len(X_test)):
+    if len(X_test[i].shape) == 4:
+        X_test[i] = rearrange(X_test[i],"n (c1 c) h w -> n c1 c h w",c1=2)
+
+for i in X_train:
+    print(i.shape)
+
+Y_train = mmn.inverse_transform(Y_train)  # X is MaxMinNormalized, Y is real value
+Y_test = mmn.inverse_transform(Y_test)
+
+c_conf = (len_closeness, nb_flow, map_height,
+              map_width) if len_closeness > 0 else None
+t_conf = (len_trend, nb_flow, map_height,
+          map_width) if len_trend > 0 else None
 
 
-# load data
-print("loading data...")
-fname = os.path.join(path_cache, 'TaxiNYC_C{}_P{}_T{}.h5'.format(
-    len_c, len_p, len_t))
-if os.path.exists(fname) and CACHEDATA:
-    X_train_all, Y_train_all, X_train, Y_train, \
-    X_val, Y_val, X_test, Y_test, mmn, external_dim, \
-    timestamp_train_all, timestamp_train, timestamp_val, timestamp_test, mask = read_cache(
-        fname, 'preprocessing_taxinyc.pkl')
-    print("load %s successfully" % fname)
-else:
-    X_train_all, Y_train_all, X_train, Y_train, \
-    X_val, Y_val, X_test, Y_test, mmn, external_dim, \
-    timestamp_train_all, timestamp_train, timestamp_val, timestamp_test, mask = TaxiNYC.load_data(
-        T=T, nb_flow=nb_flow, len_closeness=len_c, len_period=len_p, len_trend=len_t, len_test=len_test,
-        len_val=len_val, preprocess_name='preprocessing_taxinyc.pkl', meta_data=True, datapath=DATAPATH)
-    if CACHEDATA:
-        cache(fname, X_train_all, Y_train_all, X_train, Y_train, X_val, Y_val, X_test, Y_test,
-                external_dim, timestamp_train_all, timestamp_train, timestamp_val, timestamp_test, mask)
-
-# print("\n days (test): ", [v[:8] for v in timestamp_test[0::T]])
-print('=' * 10)
-
-def train_model(lr, batch_size, lstm, lstm_number, save_results=False, i=''):
+def train_model(lr, batch_size, residual_units, save_results=False, i=''):
     # get discrete parameters
-    lstm = 350 if lstm < 1 else 500
-    lstm_number = int(lstm_number)
-    batch_size = 16 if batch_size < 2 else 64
+    residual_units = int(residual_units)
+    batch_size = 16 * int(batch_size)
+    # kernel_size = int(kernel_size)
     lr = round(lr,5)
 
     # build model
-    model = build_model('NY', X_train,  Y_train, conv_filt=64, kernel_sz=(2,3,3), 
-                    mask=mask, lstm=lstm, lstm_number=lstm_number, add_external_info=True,
-                    lr=lr, save_model_pic=None)
-
+    model = ST3DNet(c_conf=c_conf, t_conf=t_conf, external_dim=external_dim,
+                        nb_residual_unit=residual_units)
+    adam = Adam(lr=lr)
+    model.compile(loss='mse', optimizer=adam, metrics=[rmse])
     # model.summary()
-    hyperparams_name = 'TaxiNYC{}.c{}.p{}.t{}.lstm_{}.lstmnumber_{}.lr_{}.batchsize_{}'.format(
-            i, len_c, len_p, len_t, lstm, lstm_number, lr, batch_size)
+    hyperparams_name = 'BikeDC{}.c{}.p{}.t{}.resunits_{}.lr_{}.batchsize_{}'.format(
+        i, len_c, len_p, len_t, residual_units,
+        lr, batch_size)
     fname_param = os.path.join('MODEL', '{}.best.h5'.format(hyperparams_name))
 
     early_stopping = EarlyStopping(monitor='val_rmse', patience=25, mode='min')
@@ -116,7 +103,7 @@ def train_model(lr, batch_size, lstm, lstm_number, save_results=False, i=''):
         print(f'Iteration {i}')
         np.random.seed(i * 18)
         tf.random.set_seed(i * 18)
-    history = model.fit(X_train_all, Y_train_all,
+    history = model.fit(X_train, Y_train,
                         epochs=nb_epoch,
                         batch_size=batch_size,
                         validation_data=(X_test, Y_test),
@@ -143,10 +130,10 @@ def train_model(lr, batch_size, lstm, lstm_number, save_results=False, i=''):
 
         Y_pred = model.predict(X_test)  # compute predictions
 
-        score = evaluate(Y_test, Y_pred, mmn, rmse_factor=1)  # evaluate performance
+        score = evaluate(Y_test, Y_pred, rmse_factor=1)  # evaluate performance
 
         # save to csv
-        csv_name = os.path.join('results', '3dclost_taxiNYC_results.csv')
+        csv_name = os.path.join('results', 'st3dnet_BikeDC_results.csv')
         if not os.path.isfile(csv_name):
             if os.path.isdir('results') is False:
                 os.makedirs('results')
@@ -173,35 +160,34 @@ def train_model(lr, batch_size, lstm, lstm_number, save_results=False, i=''):
 
 # bayesian optimization
 optimizer = BayesianOptimization(f=train_model,
-                                 pbounds={'lstm': (0, 1.999), # 350 if smaller than 1 else 500
-                                          'lstm_number': (2, 3.999),
+                                 pbounds={'residual_units': (4, 6.999),
                                           'lr': (0.0001,0.001),
-                                          'batch_size': (1, 2.999), # 16 if smaller than 2 else 64
+                                          'batch_size': (1, 2.999), # *16
                                         #   'kernel_size': (3, 5.999)
                                  },
                                  verbose=2)
 
-optimizer.maximize(init_points=2, n_iter=12)
+optimizer.maximize(init_points=2, n_iter=10)
 
 # training-test-evaluation iterations with best params
 if os.path.isdir('results') is False:
     os.makedirs('results')
 targets = [e['target'] for e in optimizer.res]
-bs_fname = 'bs_taxiNYC.json'
+bs_fname = 'bs_BikeDC.json'
 with open(os.path.join('results', bs_fname), 'w') as f:
     json.dump(optimizer.res, f, indent=2)
 best_index = targets.index(max(targets))
 params = optimizer.res[best_index]['params']
 # save best params
-params_fname = '3dclost_taxiNYC_best_params.json'
+params_fname = 'st3dnet_BikeDC_best_params.json'
 with open(os.path.join('results', params_fname), 'w') as f:
     json.dump(params, f, indent=2)
 # with open(os.path.join('results', params_fname), 'r') as f:
 #     params = json.load(f)
 for i in range(0, 10):
-    train_model(lstm=params['lstm'],
-                lstm_number=params['lstm_number'],
+    train_model(residual_units=params['residual_units'],
                 lr=params['lr'],
                 batch_size=params['batch_size'],
+                # kernel_size=params['kernel_size'],
                 save_results=True,
                 i=i)

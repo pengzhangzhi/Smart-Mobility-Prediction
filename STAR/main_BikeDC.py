@@ -1,132 +1,160 @@
 from __future__ import print_function
 import os
-import pickle
+import _pickle as pickle
 import numpy as np
-import time
-import h5py
 import math
-from sklearn.model_selection import ParameterGrid
-from bayes_opt import BayesianOptimization
+import h5py
 import json
+import time
+from sklearn.model_selection import ParameterGrid
+import sys
+from os.path import abspath, join, dirname
+sys.path.insert(0, join(abspath(dirname(__file__)), '../'))
 
-import tensorflow as tf
 from keras import backend as K
 from keras.optimizers import Adam
 from keras.callbacks import EarlyStopping, ModelCheckpoint
+from bayes_opt import BayesianOptimization
+from data.prepareDataBike import load_data_Bike, load_data_Bike_STAR
 
-from deepst.models.STResNet import stresnet
-import deepst.metrics as metrics
-from deepst.datasets import TaxiNYC
-from deepst.evaluation import evaluate
+from star.model import *
+import star.metrics as metrics
+# from star import BikeDC
+from star.evaluation import evaluate
 
 # parameters
-DATAPATH = '../data'
+DATAPATH = '../data' 
 nb_epoch = 100  # number of epoch at training stage
 # nb_epoch_cont = 150  # number of epoch at training (cont) stage
 batch_size = [16, 32, 64]  # batch size
-T = 24  # number of time intervals in one day
+T = 48  # number of time intervals in one day
 CACHEDATA = True  # cache data or NOT
 
 lr = [0.00015, 0.00035]  # learning rate
-len_closeness = 3  # length of closeness dependent sequence
-len_period = 1  # length of peroid dependent sequence
-len_trend = 1  # length of trend dependent sequence
+len_c = 3  # length of closeness dependent sequence
+len_p = 1  # length of peroid dependent sequence
+len_t = 1  # length of trend dependent sequence
 len_cpt = [[3,1,1]]
 nb_residual_unit = [2,4,6]   # number of residual units
 
 nb_flow = 2  # there are two types of flows: new-flow and end-flow
-# divide data into two subsets: Train & Test,
+# divide data into two subsets: Train & Test, 
 days_test = 7*4
 len_test = T*days_test
 len_val = 2*len_test
 
-map_height, map_width = 16, 8  # grid size
+map_height, map_width = 32, 16  # grid size
 
-path_cache = os.path.join(DATAPATH, 'CACHE', 'ST-ResNet')  # cache path
+path_cache = os.path.join(DATAPATH, 'CACHE', 'STAR')  # cache path
 path_result = 'RET'
 path_model = 'MODEL'
 if os.path.isdir(path_result) is False:
-    os.mkdirs(path_result)
+    os.makedirs(path_result)
 if os.path.isdir(path_model) is False:
-    os.mkdirs(path_model)
+    os.makedirs(path_model)
 if CACHEDATA and os.path.isdir(path_cache) is False:
-    os.mkdirs(path_cache)
+    os.makedirs(path_cache)
 
-def build_model(len_closeness, len_period, len_trend, nb_flow, map_height, map_width,
+def build_model(len_c, len_p, len_t, nb_flow, map_height, map_width,
                 external_dim, nb_residual_unit, bn, bn2=False, save_model_pic=False, lr=0.00015):
-    c_conf = (len_closeness, nb_flow, map_height,
-              map_width) if len_closeness > 0 else None
-    p_conf = (len_period, nb_flow, map_height,
-              map_width) if len_period > 0 else None
-    t_conf = (len_trend, nb_flow, map_height,
-              map_width) if len_trend > 0 else None
+    c_conf = (len_c, nb_flow, map_height,
+              map_width) if len_c > 0 else None
+    p_conf = (len_p, nb_flow, map_height,
+              map_width) if len_p > 0 else None
+    t_conf = (len_t, nb_flow, map_height,
+              map_width) if len_t > 0 else None
 
-    model = stresnet(c_conf=c_conf, p_conf=p_conf, t_conf=t_conf,
+    model = STAR(c_conf=c_conf, p_conf=p_conf, t_conf=t_conf,
                      external_dim=external_dim, nb_residual_unit=nb_residual_unit, bn=bn, bn2=bn2)
     adam = Adam(lr=lr)
     model.compile(loss='mse', optimizer=adam, metrics=[metrics.rmse])
     # model.summary()
     if (save_model_pic):
         from keras.utils.vis_utils import plot_model
-        plot_model(model, to_file='TaxiNYC_model.png', show_shapes=True)
+        plot_model(model, to_file='BikeDC_model.png', show_shapes=True)
 
     return model
 
 def read_cache(fname):
-    mmn = pickle.load(open('preprocessing_taxinyc.pkl', 'rb'))
+    mmn = pickle.load(open('preprocessing_BikeDC.pkl', 'rb'))
 
     f = h5py.File(fname, 'r')
     num = int(f['num'].value)
-    X_train, Y_train, X_test, Y_test = [], [], [], []
+    X_train_all, Y_train_all, X_train, Y_train, X_val, Y_val, X_test, Y_test = [], [], [], [], [], [], [], []
     for i in range(num):
+        X_train_all.append(f['X_train_all_%i' % i].value)
         X_train.append(f['X_train_%i' % i].value)
+        X_val.append(f['X_val_%i' % i].value)
         X_test.append(f['X_test_%i' % i].value)
+    Y_train_all = f['Y_train_all'].value
     Y_train = f['Y_train'].value
+    Y_val = f['Y_val'].value
     Y_test = f['Y_test'].value
     external_dim = f['external_dim'].value
+    timestamp_train_all = f['T_train_all'].value
     timestamp_train = f['T_train'].value
+    timestamp_val = f['T_val'].value
     timestamp_test = f['T_test'].value
     f.close()
 
-    return X_train, Y_train, X_test, Y_test, mmn, external_dim, timestamp_train, timestamp_test
+    return X_train_all, Y_train_all, X_train, Y_train, X_val, Y_val, X_test, Y_test, mmn, external_dim, timestamp_train_all, timestamp_train, timestamp_val, timestamp_test
 
-def cache(fname, X_train, Y_train, X_test, Y_test, external_dim, timestamp_train, timestamp_test):
+def cache(fname, X_train_all, Y_train_all, X_train, Y_train, X_val, Y_val, X_test, Y_test, external_dim, timestamp_train_all, timestamp_train, timestamp_val, timestamp_test):
     h5 = h5py.File(fname, 'w')
-    h5.create_dataset('num', data=len(X_train))
+    h5.create_dataset('num', data=len(X_train_all))
 
+    for i, data in enumerate(X_train_all):
+        h5.create_dataset('X_train_all_%i' % i, data=data)
     for i, data in enumerate(X_train):
         h5.create_dataset('X_train_%i' % i, data=data)
+    for i, data in enumerate(X_val):
+        h5.create_dataset('X_val_%i' % i, data=data)
     # for i, data in enumerate(Y_train):
     for i, data in enumerate(X_test):
         h5.create_dataset('X_test_%i' % i, data=data)
+
+    h5.create_dataset('Y_train_all', data=Y_train_all)
     h5.create_dataset('Y_train', data=Y_train)
+    h5.create_dataset('Y_val', data=Y_val)
     h5.create_dataset('Y_test', data=Y_test)
     external_dim = -1 if external_dim is None else int(external_dim)
     h5.create_dataset('external_dim', data=external_dim)
+    h5.create_dataset('T_train_all', data=timestamp_train_all)
     h5.create_dataset('T_train', data=timestamp_train)
+    h5.create_dataset('T_val', data=timestamp_val)
     h5.create_dataset('T_test', data=timestamp_test)
     h5.close()
 
-    # load data
 print("loading data...")
-fname = os.path.join(path_cache, 'TaxiNYC_C{}_P{}_T{}.h5'.format(
-    len_closeness, len_period, len_trend))
+fname = os.path.join(path_cache, 'BikeDC_C{}_P{}_T{}.h5'.format(
+    len_c, len_p, len_t))
 if os.path.exists(fname) and CACHEDATA:
-    X_train, Y_train, X_test, Y_test, mmn, external_dim, timestamp_train, timestamp_test = read_cache(
+    X_train_all, Y_train_all, X_train, Y_train, \
+    X_val, Y_val, X_test, Y_test, mmn, external_dim, \
+    timestamp_train_all, timestamp_train, timestamp_val, timestamp_test = read_cache(
         fname)
     print("load %s successfully" % fname)
 else:
-    X_train, Y_train, X_test, Y_test, mmn, external_dim, timestamp_train, timestamp_test = TaxiNYC.load_data(
-        T=T, nb_flow=nb_flow, len_closeness=len_closeness, len_period=len_period, len_trend=len_trend, len_test=len_test,
-        preprocess_name='preprocessing_taxinyc.pkl', meta_data=True,
-        meteorol_data=True, holiday_data=True, datapath=DATAPATH)
+    X_train_all, Y_train_all, X_test, Y_test, mmn, external_dim, timestamp_train_all, timestamp_test = load_data_Bike_STAR(T=T, nb_flow=nb_flow,dataset="BIKEDC201901-202201",
+                      len_closeness=len_c, len_period=len_p, len_trend=len_t,
+                      len_test=len_test, meta_data=True, holiday_data=True, meteorol_data=True,prediction_offset=0)
+    X_train, Y_train = np.zeros((3,3)),np.zeros((3,3)) 
+    X_val, Y_val,timestamp_train, timestamp_val = np.zeros((3,3)),np.zeros((3,3)),np.zeros((3,3)),np.zeros((3,3))
     if CACHEDATA:
-        cache(fname, X_train, Y_train, X_test, Y_test,
-              external_dim, timestamp_train, timestamp_test)
+        cache(fname, X_train_all, Y_train_all, X_train, Y_train, X_val, Y_val, X_test, Y_test,
+                external_dim, timestamp_train_all, timestamp_train, timestamp_val, timestamp_test)
+temp_train = list()
+temp_train.append(np.concatenate(X_train_all[:-1],axis=1))
+temp_train.append(X_train_all[-1])
+X_train_all = temp_train
+
+temp_test = list()
+temp_test.append(np.concatenate(X_test[:-1],axis=1))
+temp_test.append(X_test[-1])
+X_test = temp_test
 
 print("\n days (test): ", [v[:8] for v in timestamp_test[0::T]])
 print('=' * 10)
-
 
 def train_model(lr, batch_size, residual_units, save_results=False, i=''):
     # get discrete parameters
@@ -137,7 +165,7 @@ def train_model(lr, batch_size, residual_units, save_results=False, i=''):
 
     # build model
     tf.keras.backend.set_image_data_format('channels_first')
-    model = build_model(len_closeness, len_period, len_trend, nb_flow, map_height,
+    model = build_model(len_c, len_p, len_t, nb_flow, map_height,
                         map_width, external_dim, residual_units,
                         bn=True,
                         bn2=True,
@@ -145,8 +173,8 @@ def train_model(lr, batch_size, residual_units, save_results=False, i=''):
                         lr=lr
                         )
     # model.summary()
-    hyperparams_name = 'TaxiNYC{}.c{}.p{}.t{}.resunits_{}.lr_{}.batchsize_{}'.format(
-        i, len_closeness, len_period, len_trend, residual_units,
+    hyperparams_name = 'BikeDC{}.c{}.p{}.t{}.resunits_{}.lr_{}.batchsize_{}'.format(
+        i, len_c, len_p, len_t, residual_units,
         lr, batch_size)
     fname_param = os.path.join('MODEL', '{}.best.h5'.format(hyperparams_name))
 
@@ -162,7 +190,7 @@ def train_model(lr, batch_size, residual_units, save_results=False, i=''):
         print(f'Iteration {i}')
         np.random.seed(i * 18)
         tf.random.set_seed(i * 18)
-    history = model.fit(X_train, Y_train,
+    history = model.fit(X_train_all, Y_train_all,
                         epochs=nb_epoch,
                         batch_size=batch_size,
                         validation_data=(X_test, Y_test),
@@ -192,10 +220,10 @@ def train_model(lr, batch_size, residual_units, save_results=False, i=''):
         score = evaluate(Y_test, Y_pred, mmn, rmse_factor=1)  # evaluate performance
 
         # save to csv
-        csv_name = os.path.join('results', 'star_taxiNYC_results.csv')
+        csv_name = os.path.join('results', 'star_BikeDC_results.csv')
         if not os.path.isfile(csv_name):
             if os.path.isdir('results') is False:
-                os.mkdirs('results')
+                os.makedirs('results')
             with open(csv_name, 'a', encoding="utf-8") as file:
                 file.write('iteration,'
                            'rsme_in,rsme_out,rsme_tot,'
@@ -212,7 +240,7 @@ def train_model(lr, batch_size, residual_units, save_results=False, i=''):
             file.close()
         K.clear_session()
 
-# bayes opt is a maximization algorithm, to minimize validation_loss, return 1-this
+    # bayes opt is a maximization algorithm, to minimize validation_loss, return 1-this
     bayes_opt_score = 1.0 - score[1]
 
     return bayes_opt_score
@@ -220,7 +248,7 @@ def train_model(lr, batch_size, residual_units, save_results=False, i=''):
 # bayesian optimization
 optimizer = BayesianOptimization(f=train_model,
                                  pbounds={'residual_units': (1, 3.999), # *2
-                                          'lr': (0.001, 0.0001),
+                                          'lr': ( 0.0001,0.001),
                                           'batch_size': (1, 2.999), # *16
                                         #   'kernel_size': (3, 5.999)
                                  },
@@ -230,15 +258,15 @@ optimizer.maximize(init_points=2, n_iter=10)
 
 # training-test-evaluation iterations with best params
 if os.path.isdir('results') is False:
-    os.mkdirs('results')
+    os.makedirs('results')
 targets = [e['target'] for e in optimizer.res]
-bs_fname = 'bs_taxiNYC.json'
+bs_fname = 'bs_BikeDC.json'
 with open(os.path.join('results', bs_fname), 'w') as f:
     json.dump(optimizer.res, f, indent=2)
 best_index = targets.index(max(targets))
 params = optimizer.res[best_index]['params']
 # save best params
-params_fname = 'star_taxiNYC_best_params.json'
+params_fname = 'star_BikeDC_best_params.json'
 with open(os.path.join('results', params_fname), 'w') as f:
     json.dump(params, f, indent=2)
 # with open(os.path.join('results', params_fname), 'r') as f:

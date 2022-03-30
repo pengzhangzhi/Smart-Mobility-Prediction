@@ -45,4 +45,4 @@ def multi_step_2D(model, x_test, y_test, mmn, len_closeness, step):
         score = evaluate(y_test[i:], y_pre[i][0], mmn)
         dict_multi_score[i] = score
 
-    return dict_multi_score
+    return dict_multi_score 

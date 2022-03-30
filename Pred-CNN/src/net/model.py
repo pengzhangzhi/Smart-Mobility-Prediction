@@ -41,7 +41,8 @@ def predcnn(input_length, map_height, map_width, channels=2, encoder_length=2,
     # # [batch_size, seq_length, height, width, channels]
     # gen_images = tf.transpose(gen_images, [1, 0, 2, 3, 4])
     # loss = tf.nn.l2_loss(gen_images - images[:, input_length:])
-
+    # fusing with external component
+        
     # return [gen_images, loss]
     return Model(main_input, output)
 

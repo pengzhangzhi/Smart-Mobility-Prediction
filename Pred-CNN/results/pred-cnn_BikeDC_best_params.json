@@ -1,0 +1,7 @@
+{
+  "batch_size": 1.7504536310546104,
+  "decoder_length": 3.2292758114657456,
+  "encoder_length": 2.0,
+  "lr": 0.0001,
+  "num_hidden": 6.999
+}

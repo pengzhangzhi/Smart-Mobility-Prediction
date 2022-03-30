@@ -1,0 +1,2 @@
+dataset,rsme_in,rsme_out,rsme_tot,mape_in,mape_out,mape_tot,ape_in,ape_out,ape_tot
+BikeDC,0.060802850320876047,0.20773724245970415,4.9138438054618145,nan,nan,105.78074645996094,0.0,0.0,2160360.1639732393

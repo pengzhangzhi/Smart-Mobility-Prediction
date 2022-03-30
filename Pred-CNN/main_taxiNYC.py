@@ -61,13 +61,13 @@ path_cache = os.path.join(DATAPATH, 'CACHE', 'Pred-CNN')  # cache path
 path_result = 'RET'
 path_model = 'MODEL'
 if os.path.isdir(path_result) is False:
-    os.mkdir(path_result)
+    os.makedirs(path_result)
 if os.path.isdir(path_model) is False:
-    os.mkdir(path_model)
+    os.makedirs(path_model)
 if CACHEDATA and os.path.isdir(path_cache) is False:
-    os.mkdir(path_cache)
+    os.makedirs(path_cache)
 if os.path.isdir('results') is False:
-    os.mkdir('results')
+    os.makedirs('results')
 
 
 print("loading data...")
@@ -90,6 +90,11 @@ else:
     if CACHEDATA:
         cache(fname, X_train_all, Y_train_all, X_train, Y_train, X_val, Y_val, X_test, Y_test,
                 external_dim, timestamp_train_all, timestamp_train, timestamp_val, timestamp_test)
+print("training shape:")
+for x in X_train_all:
+    print(x.shape)
+X_train_all = X_train_all[0]
+X_test = X_test[0]
 
 print("\n days (test): ", [v[:8] for v in timestamp_test[0::T]])
 print('=' * 10)
@@ -158,7 +163,7 @@ def train_model(lr, batch_size, num_hidden, encoder_length, decoder_length, save
         csv_name = os.path.join('results', 'pred-cnn_taxiNYC_results.csv')
         if not os.path.isfile(csv_name):
             if os.path.isdir('results') is False:
-                os.mkdir('results')
+                os.makedirs('results')
             with open(csv_name, 'a', encoding="utf-8") as file:
                 file.write('iteration,'
                            'rsme_in,rsme_out,rsme_tot,'
@@ -185,7 +190,7 @@ optimizer = BayesianOptimization(f=train_model,
                                  pbounds={'num_hidden': (5, 6.999), # 2**
                                           'encoder_length': (2, 3.999),
                                           'decoder_length': (2, 3.999), # *2
-                                          'lr': (0.001, 0.0001),
+                                          'lr': ( 0.0001,0.001),
                                           'batch_size': (1, 2.999), # *16
                                         #   'kernel_size': (3, 5.999)
                                  },
@@ -196,7 +201,7 @@ bs_fname = 'bs_taxiNYC.json'
 #logger = JSONLogger(path="./results/" + bs_fname)
 #optimizer.subscribe(Events.OPTIMIZATION_STEP, logger)
 
-#optimizer.maximize(init_points=2, n_iter=10)
+optimizer.maximize(init_points=2, n_iter=10)
 load_logs(optimizer, logs=["./results/" + bs_fname])
 # training-test-evaluation iterations with best params
 targets = [e['target'] for e in optimizer.res]

@@ -1,3 +1,4 @@
+from einops import rearrange
 import numpy as np
 import time
 import os
@@ -10,9 +11,10 @@ from bayes_opt.event import Events
 from bayes_opt.util import load_logs
 import tensorflow as tf
 from keras import backend as K
-
+import sys
+from os.path import abspath, join, dirname
 from utils import cache, read_cache
-from src import TaxiNYC3d
+# from src import BikeDC3d
 from src.evaluation import evaluate
 from src import (
     model as m1,
@@ -37,6 +39,11 @@ models_dict = {
     'model5': m5,
     'model6': m6,
 }
+import sys
+sys.path.append('/home/ubuntu/Smart-Mobility-Prediction/data')
+print(sys.path)
+
+from prepareDataBike import load_data_Bike, load_data_Bike_STAR
 
 # tf.config.experimental.set_virtual_device_configuration(gpus[0], [tf.config.experimental.VirtualDeviceConfiguration(memory_limit=6144)])
 gpus = tf.config.experimental.list_physical_devices('GPU')
@@ -55,7 +62,7 @@ tf.random.set_seed(1234)
 model_name = 'model3resunit_doppia_attention'
 DATAPATH = '../data'  
 nb_epoch = 150  # number of epoch at training stage
-T = 24  # number of time intervals in one day
+T = 48  # number of time intervals in one day
 CACHEDATA = True  # cache data or NOT
 
 len_closeness = 4  # length of closeness dependent sequence
@@ -67,7 +74,7 @@ days_test = 4*7 # 4 weeks
 len_test = T * days_test
 len_val = 2 * len_test
 
-map_height, map_width = 16, 8  # grid size
+map_height, map_width = 32, 16  # grid size
 
 cache_folder = 'Autoencoder/model3' if model_name in ['model3', 'model3attention', 'model3resunit', 'model3resunit_attention', 'model3resunit_doppia_attention'] else 'Autoencoder'
 path_cache = os.path.join(DATAPATH, 'CACHE', cache_folder)  # cache path
@@ -86,28 +93,37 @@ if os.path.isdir('results') is False:
 
 # load data
 print("loading data...")
-fname = os.path.join(path_cache, 'TaxiNYC_C{}_P{}_T{}.h5'.format(
+fname = os.path.join(path_cache, 'BikeDC_C{}_P{}_T{}.h5'.format(
     len_closeness, len_period, len_trend))
 if os.path.exists(fname) and CACHEDATA:
     X_train_all, Y_train_all, X_train, Y_train, \
     X_val, Y_val, X_test, Y_test, mmn, external_dim, \
     timestamp_train_all, timestamp_train, timestamp_val, timestamp_test = read_cache(
-        fname, 'preprocessing_bj.pkl')
+        fname, 'preprocessing_BikeDC.pkl')
     print("load %s successfully" % fname)
 else:
     #if (model_name.startswith('model3')):
-    load_data = TaxiNYC3d.load_data
+    
     #else:
     #    load_data = TaxiBJ.load_data
-    X_train_all, Y_train_all, X_train, Y_train, \
-    X_val, Y_val, X_test, Y_test, mmn, external_dim, \
-    timestamp_train_all, timestamp_train, timestamp_val, timestamp_test = load_data(
-        T=T, nb_flow=nb_flow, len_closeness=len_closeness, len_period=len_period, len_trend=len_trend, len_test=len_test,
-        len_val=len_val, preprocess_name='preprocessing_bj.pkl', meta_data=True, meteorol_data=True, holiday_data=True, datapath=DATAPATH)
+    X_train_all, Y_train_all, X_test, Y_test, mmn, external_dim, timestamp_train_all, timestamp_test = load_data_Bike(T=T, nb_flow=nb_flow,dataset="BIKEDC201901-202201",
+                      len_closeness=len_closeness, len_period=len_period, len_trend=len_trend,
+                      len_test=len_test, meta_data=True, holiday_data=True, meteorol_data=True,prediction_offset=0)
+    
+        
     if CACHEDATA:
+        X_train, Y_train = np.zeros((3,3)),np.zeros((3,3)) 
+        X_val, Y_val,timestamp_train, timestamp_val = np.zeros((3,3)),np.zeros((3,3)),np.zeros((3,3)),np.zeros((3,3))
         cache(fname, X_train_all, Y_train_all, X_train, Y_train, X_val, Y_val, X_test, Y_test,
               external_dim, timestamp_train_all, timestamp_train, timestamp_val, timestamp_test)
-
+for i in range(len(X_train_all)):
+    if len(X_train_all[i].shape) == 4:
+        X_train_all[i] = rearrange(X_train_all[i],"n h w (c1 c) -> n c h w c1",c1=2)
+for i in range(len(X_test)):
+    if len(X_test[i].shape) == 4:
+        X_test[i] = rearrange(X_test[i],"n h w (c1 c) -> n c h w c1",c1=2)
+# Y_train_all = rearrange(Y_train_all,"n c h w -> n h w c")
+# Y_test = rearrange(Y_test,"n c h w -> n h w c")
 print(external_dim)
 print("\n days (test): ", [v[:8] for v in timestamp_test[0::T]])
 
@@ -133,7 +149,7 @@ def train_model(encoder_blocks, lr, batch_size, kernel_size, save_results=False,
         # save_model_pic=f'TaxiBJ_{model_name}'
     )
     # model.summary()
-    hyperparams_name = '{}.TaxiNYC{}.c{}.p{}.t{}.encoderblocks_{}.kernel_size_{}.lr_{}.batchsize_{}'.format(
+    hyperparams_name = '{}.BikeDC{}.c{}.p{}.t{}.encoderblocks_{}.kernel_size_{}.lr_{}.batchsize_{}'.format(
         model_name, i, len_closeness, len_period, len_trend, encoder_blocks,
         kernel_size, lr, batch_size)
     fname_param = os.path.join('MODEL', '{}.best.h5'.format(hyperparams_name))
@@ -180,7 +196,7 @@ def train_model(encoder_blocks, lr, batch_size, kernel_size, save_results=False,
         score = evaluate(Y_test, Y_pred, mmn, rmse_factor=1)  # evaluate performance
 
         # save to csv
-        csv_name = os.path.join('results', f'{model_name}_TaxiNYC_results.csv')
+        csv_name = os.path.join('results', f'{model_name}_BikeDC_results.csv')
         if not os.path.isfile(csv_name):
             if os.path.isdir('results') is False:
                 os.mkdir('results')
@@ -215,11 +231,11 @@ optimizer = BayesianOptimization(f=train_model,
                               },
                               verbose=2)
 
-bs_fname = 'bs_taxiNYC.json'
+bs_fname = 'bs_BikeDC.json'
 # logger = JSONLogger(path="./results/" + bs_fname)
 # optimizer.subscribe(Events.OPTIMIZATION_STEP, logger)
 
-optimizer.maximize(init_points=2, n_iter=10)
+optimizer.maximize(init_points=2, n_iter=1)
 
 
 # New optimizer is loaded with previously seen points
@@ -235,13 +251,13 @@ targets = [e['target'] for e in optimizer.res]
 best_index = targets.index(max(targets))
 params = optimizer.res[best_index]['params']
 # save best params
-params_fname = f'{model_name}_TaxiNYC_residui_attention_params.json'
+params_fname = f'{model_name}_BikeDC_residui_attention_params.json'
 #params_fname = 'model3_TaxiBJ_best_params.json'
 with open(os.path.join('results', params_fname), 'w') as f:
     json.dump(params, f, indent=2)
 with open(os.path.join('results', params_fname), 'r') as f:
     params = json.load(f)
-for i in range(0, 10):
+for i in range(0, 1):
    train_model(encoder_blocks=params['encoder_blocks'],
                lr=params['lr'],
                batch_size=params['batch_size'],

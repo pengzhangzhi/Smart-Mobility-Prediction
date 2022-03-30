@@ -45,11 +45,11 @@ map_height, map_width = 16, 8  # grid size
 path_result = 'RET'
 path_model = 'MODEL'
 if os.path.isdir(path_result) is False:
-    os.mkdir(path_result)
+    os.mkdirs(path_result)
 if os.path.isdir(path_model) is False:
-    os.mkdir(path_model)
+    os.mkdirs(path_model)
 if CACHEDATA and os.path.isdir(path_cache) is False:
-    os.mkdir(path_cache)
+    os.mkdirs(path_cache)
 
 def build_model(len_c, len_p, len_t, nb_flow, map_height, map_width,
                 external_dim, save_model_pic=False, lr=0.00015):
@@ -190,7 +190,7 @@ def train_model(lr, batch_size, save_results=False, i=''):
         csv_name = os.path.join('results', 'mst3d_taxiNYC_results.csv')
         if not os.path.isfile(csv_name):
             if os.path.isdir('results') is False:
-                os.mkdir('results')
+                os.mkdirs('results')
             with open(csv_name, 'a', encoding="utf-8") as file:
                 file.write('iteration,'
                            'rsme_in,rsme_out,rsme_tot,'
@@ -225,7 +225,7 @@ optimizer.maximize(init_points=2, n_iter=5)
 
 # training-test-evaluation iterations with best params
 if os.path.isdir('results') is False:
-    os.mkdir('results')
+    os.mkdirs('results')
 targets = [e['target'] for e in optimizer.res]
 bs_fname = 'bs_taxiNYC.json'
 with open(os.path.join('results', bs_fname), 'w') as f:

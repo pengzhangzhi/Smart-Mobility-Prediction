@@ -1,15 +1,21 @@
 from copy import copy
+import sys
 import numpy as np
 import os
+from os.path import abspath, join, dirname
 import datetime
+from utils import *
+from utils import evaluate
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from utils import (
-    load_stdata, remove_incomplete_days, evaluate, plot_region_data, save_to_csv
-)
-
+from data.prepareDataBike import load_data
 def get_day_of_week(timestamp):
-    date_string = timestamp.decode("utf-8")[:-2]
-    day_of_week = datetime.datetime.strptime(date_string, '%Y%m%d').strftime('%A')
+    try:
+        date_string = timestamp.decode("utf-8")[:-2]
+        day_of_week = datetime.datetime.strptime(date_string, '%Y%m%d').strftime('%A')
+    except AttributeError:
+        timestamp = timestamp.astype(str)[:10]
+        day_of_week = datetime.datetime.strptime(timestamp, '%Y-%m-%d').strftime('%A')
     return day_of_week
 
 def ha_prediction(data, timestamps, T, len_test):
@@ -123,6 +129,30 @@ def ha_prediction_bikeNYC():
     # save to csv
     save_to_csv('HA', 'BikeNYC', score)
 
+def ha_prediction_BikeDC():
+    T = 48 # number timestamps per day
+    len_test = T * 4 * 7 # number of timestamps to predict (four weeks)
+
+    # load data
+    data_all = []
+    timestamps_all = list()
+    root_path = os.path.abspath(os.path.dirname(__file__)).split('shippingSchedule')[0]
+
+    data_dir = os.path.join(root_path,"..", 'data',"BIKEDC201901-202201")
+    print("file name: ", data_dir)
+    data_all, timestamps_all = load_data(data_dir)
+
+    # make predictions
+    predicted_data = ha_prediction(data_all, timestamps_all, T, len_test)
+
+    # evaluate
+    print('Evaluating on BikeDC')
+    real_data = data_all[-len_test:]
+    score = evaluate(real_data, predicted_data)
+
+    ## save to csv
+    save_to_csv('HA', 'BikeDC', score)
+
 
 def ha_prediction_taxiNYC():
     DATAPATH = '../data'
@@ -159,79 +189,10 @@ def ha_prediction_taxiNYC():
 
     ## save to csv
     save_to_csv('HA', 'TaxiNYC', score)
-
-
-def ha_prediction_RomaNord():
-    datapath = '../data'
-    nb_flow = 2 # i.e. inflow and outflow
-    T = 48 # number timestamps per day
-    len_test = T * 7 # number of timestamps to predict
-
-    # load data
-    fname = os.path.join(datapath, 'Roma', 'AllMap', 'Roma_32x32_30_minuti_north.h5')
-    
-    print("file name: ", fname)
-    data, timestamps = load_stdata(fname)
-    # timestamps = np.array([adjust_timeslots(t) for t in timestamps])
-
-    # print(timestamps)
-    # remove a certain day which does not have 48 timestamps
-    data, timestamps = remove_incomplete_days(data, timestamps, T)
-    data = data[:, :nb_flow]
-    data[data < 0] = 0.
-    print('data shape: ' + str(data.shape))
-
-    # make predictions
-    predicted_data = ha_prediction(data, timestamps, T, len_test)
-
-    # evaluate
-    print('Evaluating on RomaNord')
-    real_data = data[-len_test:]
-    score = evaluate(real_data, predicted_data)
-
-    # plot real vs prediction data of a region
-    # plot_region_data(real_data, predicted_data, (13,3), 0)
-
-    # save to csv
-    save_to_csv('HA', 'RomaNord', score)
-
-def ha_prediction_RomaNord16x8():
-    datapath = '../data'
-    nb_flow = 2 # i.e. inflow and outflow
-    T = 24 # number timestamps per day
-    len_test = T * 7 # number of timestamps to predict
-
-    # load data
-    fname = os.path.join(datapath, 'Roma', 'AllMap', 'Roma_16x8_1_ora_resize_north.h5')
-    
-    print("file name: ", fname)
-    data, timestamps = load_stdata(fname)
-    # timestamps = np.array([adjust_timeslots(t) for t in timestamps])
-
-    # print(timestamps)
-    # remove a certain day which does not have 48 timestamps
-    data, timestamps = remove_incomplete_days(data, timestamps, T)
-    data = data[:, :nb_flow]
-    data[data < 0] = 0.
-    print('data shape: ' + str(data.shape))
-
-    # make predictions
-    predicted_data = ha_prediction(data, timestamps, T, len_test)
-
-    # evaluate
-    print('Evaluating on RomaNord16x8')
-    real_data = data[-len_test:]
-    score = evaluate(real_data, predicted_data)
-
-    # plot real vs prediction data of a region
-    # plot_region_data(real_data, predicted_data, (13,3), 0)
-
-    # save to csv
-    save_to_csv('HA', 'RomaNord16x8', score)
-
 if __name__ == '__main__':
-    ha_prediction_taxiBJ()
-    ha_prediction_bikeNYC()
-    ha_prediction_taxiNYC()
-    ha_prediction_RomaNord()
-    ha_prediction_RomaNord16x8()
+    ha_prediction_BikeDC()
+    # ha_prediction_taxiBJ()
+    # ha_prediction_bikeNYC()
+    # ha_prediction_taxiNYC()
+    # ha_prediction_RomaNord()
+    # ha_prediction_RomaNord16x8()

@@ -1,4 +1,7 @@
 from __future__ import print_function
+import sys
+from os.path import abspath, join, dirname
+sys.path.insert(0, join(abspath(dirname(__file__)), '../'))
 import os
 import pickle
 import numpy as np
@@ -8,15 +11,14 @@ import math
 from sklearn.model_selection import ParameterGrid
 from bayes_opt import BayesianOptimization
 import json
-
 import tensorflow as tf
 from keras import backend as K
 from keras.optimizers import Adam
 from keras.callbacks import EarlyStopping, ModelCheckpoint
+from data.prepareDataBike import load_data_Bike
 
 from deepst.models.STResNet import stresnet
 import deepst.metrics as metrics
-from deepst.datasets import TaxiNYC
 from deepst.evaluation import evaluate
 
 # parameters
@@ -24,7 +26,7 @@ DATAPATH = '../data'
 nb_epoch = 100  # number of epoch at training stage
 # nb_epoch_cont = 150  # number of epoch at training (cont) stage
 batch_size = [16, 32, 64]  # batch size
-T = 24  # number of time intervals in one day
+T = 48  # number of time intervals in one day
 CACHEDATA = True  # cache data or NOT
 
 lr = [0.00015, 0.00035]  # learning rate
@@ -40,17 +42,17 @@ days_test = 7*4
 len_test = T*days_test
 len_val = 2*len_test
 
-map_height, map_width = 16, 8  # grid size
+map_height, map_width = 32, 16  # grid size
 
 path_cache = os.path.join(DATAPATH, 'CACHE', 'ST-ResNet')  # cache path
 path_result = 'RET'
 path_model = 'MODEL'
 if os.path.isdir(path_result) is False:
-    os.mkdirs(path_result)
+    os.makedirs(path_result)
 if os.path.isdir(path_model) is False:
-    os.mkdirs(path_model)
+    os.makedirs(path_model)
 if CACHEDATA and os.path.isdir(path_cache) is False:
-    os.mkdirs(path_cache)
+    os.makedirs(path_cache)
 
 def build_model(len_closeness, len_period, len_trend, nb_flow, map_height, map_width,
                 external_dim, nb_residual_unit, bn, bn2=False, save_model_pic=False, lr=0.00015):
@@ -68,12 +70,12 @@ def build_model(len_closeness, len_period, len_trend, nb_flow, map_height, map_w
     # model.summary()
     if (save_model_pic):
         from keras.utils.vis_utils import plot_model
-        plot_model(model, to_file='TaxiNYC_model.png', show_shapes=True)
+        plot_model(model, to_file='BikeDC_model.png', show_shapes=True)
 
     return model
 
 def read_cache(fname):
-    mmn = pickle.load(open('preprocessing_taxinyc.pkl', 'rb'))
+    mmn = pickle.load(open("preprocessing_BikeDC.pkl", 'rb'))
 
     f = h5py.File(fname, 'r')
     num = int(f['num'].value)
@@ -109,17 +111,18 @@ def cache(fname, X_train, Y_train, X_test, Y_test, external_dim, timestamp_train
 
     # load data
 print("loading data...")
-fname = os.path.join(path_cache, 'TaxiNYC_C{}_P{}_T{}.h5'.format(
+fname = os.path.join(path_cache, 'BikeDC_C{}_P{}_T{}.h5'.format(
     len_closeness, len_period, len_trend))
 if os.path.exists(fname) and CACHEDATA:
     X_train, Y_train, X_test, Y_test, mmn, external_dim, timestamp_train, timestamp_test = read_cache(
         fname)
     print("load %s successfully" % fname)
 else:
-    X_train, Y_train, X_test, Y_test, mmn, external_dim, timestamp_train, timestamp_test = TaxiNYC.load_data(
-        T=T, nb_flow=nb_flow, len_closeness=len_closeness, len_period=len_period, len_trend=len_trend, len_test=len_test,
-        preprocess_name='preprocessing_taxinyc.pkl', meta_data=True,
-        meteorol_data=True, holiday_data=True, datapath=DATAPATH)
+    X_train, Y_train, X_test, Y_test, mmn, external_dim, timestamp_train, timestamp_test = load_data_Bike(T=T, nb_flow=nb_flow,dataset="BIKEDC201901-202201",
+                      len_closeness=len_closeness, len_period=len_period, len_trend=len_trend,
+                      len_test=len_test, meta_data=True, holiday_data=True, meteorol_data=True,prediction_offset=0)
+    assert (len_closeness + len_period + len_trend > 0)
+    
     if CACHEDATA:
         cache(fname, X_train, Y_train, X_test, Y_test,
               external_dim, timestamp_train, timestamp_test)
@@ -145,7 +148,7 @@ def train_model(lr, batch_size, residual_units, save_results=False, i=''):
                         lr=lr
                         )
     # model.summary()
-    hyperparams_name = 'TaxiNYC{}.c{}.p{}.t{}.resunits_{}.lr_{}.batchsize_{}'.format(
+    hyperparams_name = 'BikeDC{}.c{}.p{}.t{}.resunits_{}.lr_{}.batchsize_{}'.format(
         i, len_closeness, len_period, len_trend, residual_units,
         lr, batch_size)
     fname_param = os.path.join('MODEL', '{}.best.h5'.format(hyperparams_name))
@@ -168,7 +171,7 @@ def train_model(lr, batch_size, residual_units, save_results=False, i=''):
                         validation_data=(X_test, Y_test),
                         # callbacks=[early_stopping, model_checkpoint],
                         # callbacks=[model_checkpoint, lr_callback],
-                        callbacks=[model_checkpoint],
+                        callbacks=[model_checkpoint,early_stopping],
                         verbose=2)
     model.save_weights(os.path.join(
         'MODEL', '{}.h5'.format(hyperparams_name)), overwrite=True)
@@ -192,17 +195,17 @@ def train_model(lr, batch_size, residual_units, save_results=False, i=''):
         score = evaluate(Y_test, Y_pred, mmn, rmse_factor=1)  # evaluate performance
 
         # save to csv
-        csv_name = os.path.join('results', 'star_taxiNYC_results.csv')
+        csv_name = os.path.join('results', 'star_BikeDC_results.csv')
         if not os.path.isfile(csv_name):
             if os.path.isdir('results') is False:
-                os.mkdirs('results')
+                os.makedirs('results')
             with open(csv_name, 'a', encoding="utf-8") as file:
                 file.write('iteration,'
                            'rsme_in,rsme_out,rsme_tot,'
                            'mape_in,mape_out,mape_tot,'
                            'ape_in,ape_out,ape_tot'
                            )
-                file.write("\n")
+                file.write("\n") 
                 file.close()
         with open(csv_name, 'a', encoding="utf-8") as file:
             file.write(f'{i},{score[0]},{score[1]},{score[2]},{score[3]},'
@@ -220,7 +223,7 @@ def train_model(lr, batch_size, residual_units, save_results=False, i=''):
 # bayesian optimization
 optimizer = BayesianOptimization(f=train_model,
                                  pbounds={'residual_units': (1, 3.999), # *2
-                                          'lr': (0.001, 0.0001),
+                                          'lr': (0.0001,0.001 ),
                                           'batch_size': (1, 2.999), # *16
                                         #   'kernel_size': (3, 5.999)
                                  },
@@ -230,15 +233,15 @@ optimizer.maximize(init_points=2, n_iter=10)
 
 # training-test-evaluation iterations with best params
 if os.path.isdir('results') is False:
-    os.mkdirs('results')
+    os.makedirs('results')
 targets = [e['target'] for e in optimizer.res]
-bs_fname = 'bs_taxiNYC.json'
+bs_fname = 'bs_BikeDC.json'
 with open(os.path.join('results', bs_fname), 'w') as f:
     json.dump(optimizer.res, f, indent=2)
 best_index = targets.index(max(targets))
 params = optimizer.res[best_index]['params']
 # save best params
-params_fname = 'star_taxiNYC_best_params.json'
+params_fname = 'star_BikeDC_best_params.json'
 with open(os.path.join('results', params_fname), 'w') as f:
     json.dump(params, f, indent=2)
 # with open(os.path.join('results', params_fname), 'r') as f:

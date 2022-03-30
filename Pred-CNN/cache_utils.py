@@ -29,7 +29,7 @@ def read_cache(fname, preprocessing_fname):
 
     return X_train_all, Y_train_all, X_train, Y_train, X_val, Y_val, X_test, Y_test, mmn, external_dim, timestamp_train_all, timestamp_train, timestamp_val, timestamp_test
 
-def cache(fname, X_train_all, Y_train_all, X_train, Y_train, X_val, Y_val, X_test, Y_test, external_dim, timestamp_train_all, timestamp_train, timestamp_val, timestamp_test):
+def cache(fname, X_train_all, Y_train_all,  X_test, Y_test, external_dim, timestamp_train_all, timestamp_test,X_train=None, Y_train=None, X_val=None, Y_val=None,timestamp_train=None, timestamp_val=None):
     h5 = h5py.File(fname, 'w')
     h5.create_dataset('num', data=len(X_train_all))
 
